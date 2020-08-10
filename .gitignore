@@ -1,0 +1,6 @@
+**/__pycache__
+**/*.pyc
+.directory
+checkpoints
+rosbags
+formatted_data

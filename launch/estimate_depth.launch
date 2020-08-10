@@ -1,0 +1,25 @@
+<launch>
+    <arg name="output_disp" default="true" doc="save disparity img" />
+    <arg name="output_depth" default="true" doc="save depth img" />
+    <arg name="pretrained" doc="pretrained DispNet path" />
+    <arg name="img_height" default="128" doc="Image height" />
+    <arg name="img_width" default="416" doc="Image width" />
+    <arg name="no_resize" default="true" doc="no resizing is done" />
+    
+    <arg name="dataset_dir" default="input" doc="Dataset directory" />
+    <arg name="output_dir" default="output" doc="Output directory" />
+    
+    <arg name="img_exts" default="['png', 'jpg', 'bmp']" doc="images extensions to glob" />
+    
+    <node name="depth_estimation_node" pkg="ros_sfmlearner_pytorch" type="estimate_depth.py" output="screen" >
+        <param name="output_disp" value="$(arg output_disp)" />
+        <param name="output_depth" value="$(arg output_depth)" />
+        <param name="pretrained" value="$(arg pretrained)" />
+        <param name="img_height" value="$(arg img_height)" />
+        <param name="img_width" value="$(arg img_width)" />
+        <param name="no_resize" value="$(arg no_resize)" />
+        <param name="dataset_dir" value="$(arg dataset_dir)" />
+        <param name="output_dir" value="$(arg output_dir)" />
+        <param name="img_exts" value="$(arg img_exts)" />
+    </node>
+</launch>
