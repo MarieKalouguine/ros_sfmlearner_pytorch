@@ -27,8 +27,8 @@ parser.add_argument("--num-threads", type=int, default=4, help="number of thread
 args = parser.parse_args()
 
 
-def dump_example(args, scene):
-    scene_list = data_loader.collect_scenes(scene)
+def dump_example(args, drive):
+    scene_list = data_loader.collect_scenes(drive)
     for scene_data in scene_list:
         dump_dir = args.dump_root/scene_data['rel_path']
         dump_dir.makedirs_p()
@@ -39,7 +39,7 @@ def dump_example(args, scene):
         np.savetxt(dump_cam_file, intrinsics)
         poses_file = dump_dir/'poses.txt'
         poses = []
-        for sample in tqdm(data_loader.get_scene_imgs(scene_data)):
+        for sample in data_loader.get_scene_imgs(scene_data):
             img, frame_nb = sample["img"], sample["id"]
             dump_img_file = dump_dir/'{}.jpg'.format(frame_nb)
             dump_img_file.parent.makedirs_p()

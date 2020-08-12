@@ -1,3 +1,42 @@
+import numpy as np
+
+def translation_matrix(translation):
+    """Return matrix to translate by direction vector."""
+    M = np.identity(4)
+    M[:3, 3] = translation[:3]
+    return M
+
+def quaternion_matrix(quaternion):
+    """Return homogeneous rotation matrix from quaternion."""
+    q =np.array(quaternion[:4], dtype=np.float64, copy=True)
+    nq =np.dot(q, q)
+    if nq < 0.01:
+        return np.identity(4)
+    q *= np.sqrt(2.0 / nq)
+    q =np.outer(q, q)
+    return np.array((
+        (1.0-q[1, 1]-q[2, 2],     q[0, 1]-q[2, 3],     q[0, 2]+q[1, 3], 0.0),
+        (    q[0, 1]+q[2, 3], 1.0-q[0, 0]-q[2, 2],     q[1, 2]-q[0, 3], 0.0),
+        (    q[0, 2]-q[1, 3],     q[1, 2]+q[0, 3], 1.0-q[0, 0]-q[1, 1], 0.0),
+        (                0.0,                 0.0,                 0.0, 1.0)
+        ), dtype=np.float64)
+
+def matrix_from_Pose_msg(pose_msg):
+    position = [pose_msg.position.x, pose_msg.position.y, pose_msg.position.z]
+    orientation = [pose_msg.orientation.x, pose_msg.orientation.y, pose_msg.orientation.z, pose_msg.orientation.w]
+    return translation_matrix(position) @ quaternion_matrix(orientation)
+
+def matrix_from_Transform_msg(tf_msg):
+    translation = [tf_msg.translation.x, tf_msg.translation.y, tf_msg.translation.z]
+    rotation = [tf_msg.rotation.x, tf_msg.rotation.y, tf_msg.rotation.z, tf_msg.rotation.w]
+    return translation_matrix(translation) @ quaternion_matrix(rotation)
+
+def pose_from_Pose_and_Transform(pose_msg, tf_msg):
+    """
+    Return the pose after the transformation of a geometry_msgs/Pose by a geometry_msgs/Tranform.
+    Return is a 4x4 matrix.
+    """
+    return matrix_from_Pose_msg(pose_msg) @ matrix_from_Transform_msg(tf_msg)
 
 class Namespace(object):
     """A simple class to hold the keys and arguments found from the

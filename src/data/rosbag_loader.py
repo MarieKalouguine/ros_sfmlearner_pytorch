@@ -7,7 +7,6 @@ from imageio import imread
 import rosbag
 from ros_numpy import numpify
 from sensor_msgs.msg import CompressedImage as ROS_Image
-# from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose, Transform
 from rospy.rostime import Time
 
@@ -79,31 +78,25 @@ class RosbagLoader(object):
             self.scenes.append(scene)
 
     def collect_scenes(self, drive):    #Create a dictionary for the data from a given scene/drive, including all images from the camera
-        bag_object = rosbag.Bag(drive).read_messages(topics=["/tf", self.image_topic, self.depth_topic, self.odom_topic, self.cam_info_topic])
-        scene_data = {'drive': drive.name[:-4], 'bag': bag_object, 'rel_path': drive.name[:-4], 'pose': [], 'intrinsics': [], 'frame_id': [], 'pose':[], 'images':[], 'depth':[]}
+        bag_object = rosbag.Bag(drive)
+        scene_data = {'drive': drive.name[:-4], 'bag': bag_object, 'rel_path': drive.name[:-4], 'pose': [], 'intrinsics': [], 'frame_id': [], 'depth_frame_id': [], 'pose':[]}
         
         known_position = False
         known_transform = False
         img_counter = 0
         depth_counter = 0
-        
-        
-        for msg in scene_data['bag']:
+        for msg in scene_data['bag'].read_messages(topics=["/tf", self.image_topic, self.depth_topic, self.odom_topic, self.cam_info_topic]):
             
             if known_position:
                 if msg.topic == self.image_topic and img_counter <= depth_counter:
                     img_counter += 1
                     scene_data['frame_id'].append(str(msg.timestamp))
-                    msg.message.__class__ = ROS_Image
-                    np_img = imread(bytes(msg.message.data))
-                    scene_data['images'].append(np_img)
                     scene_data['pose'].append(pose)
                     
                 if msg.topic == self.depth_topic and img_counter >= depth_counter:
                     depth_counter += 1
-                    msg.message.__class__ = ROS_Image
-                    np_depth = imread(bytes(msg.message.data))
-                    scene_data['depth'].append(np_depth)
+                    scene_data['depth_frame_id'].append(str(msg.timestamp))
+                known_position = False
                     
             if known_transform and msg.topic == self.odom_topic:
                 known_position = True
@@ -119,11 +112,11 @@ class RosbagLoader(object):
             if msg.topic == self.cam_info_topic:
                 scene_data['intrinsics'] = msg.message.K
         
-        if len(scene_data['images'])>len(scene_data['depth']):
-            scene_data['images'] = scene_data['images'][:-1]
+        if len(scene_data['frame_id'])>len(scene_data['depth_frame_id']):
+            scene_data['frame_id'] = scene_data['frame_id'][:-1]
             scene_data['pose'] = scene_data['pose'][:-1]
-        if len(scene_data['images'])<len(scene_data['depth']):
-            scene_data['depth'] = scene_data['depth'][:-1]
+        if len(scene_data['frame_id'])<len(scene_data['depth_frame_id']):
+            scene_data['depth_frame_id'] = scene_data['depth_frame_id'][:-1]
             
         if img_counter==0:  #Check that the scene is not empty
             return []
@@ -131,32 +124,48 @@ class RosbagLoader(object):
         return [scene_data]
 
     def get_scene_imgs(self, scene_data):   #Collect the images of a given scene, taking speed into account
-        def construct_sample(scene_data, i, frame_id):
-            sample = {"img":self.load_image(scene_data, i)[0], "id":frame_id}   #get the image with this index, and associate the frame identifier
-
-            if self.get_depth:
-                sample['depth'] = scene_data['depth'][i]    #get ground truth depth map
-            if self.get_pose:
-                sample['pose'] = scene_data['pose'][i][:3]    #get ground truth pose
-            return sample
         
-        yield construct_sample(scene_data, 0, scene_data['frame_id'][0])
+        selected_frames = [0]
         last_pose = scene_data['pose'][0]
         for i, pose in enumerate(scene_data['pose'][1:]):
-            transform = np.linalg.inv(last_pose) @ pose  #shift in pose as from the last selected frame
+            transform = np.linalg.inv(last_pose) @ pose  #pose transform matrix from the last selected frame
             speed_mag = np.linalg.norm(transform - np.eye(4))
             if speed_mag > self.min_speed:  #If the last frame was taken far enough
-                frame_id = scene_data['frame_id'][i]    #register a unique frame identifier (independent from the index i)
-                yield construct_sample(scene_data, i+1, frame_id)
-                last_pose = scene_data['pose'][i+1]
-
-    def load_image(self, scene_data, i):  #Load and resize an image corresponding to a given index
-        img = scene_data['images'][i]
-        zoom_y = self.img_height/img.shape[0]
-        zoom_x = self.img_width/img.shape[1]
-        img = imresize(img, (self.img_height, self.img_width))  #resize the image to the size provided by the user
-
-        # workaround for skimage (float [0 .. 1]) and imageio (uint8 [0 .. 255]) interoperability  
-        img = (img * 255).astype(np.uint8)
-
-        return img, zoom_x, zoom_y
+                selected_frames.append(i+1) #register this frame as a valid one
+                last_pose = pose
+        
+        nb_frames = len(selected_frames)
+        k = 0
+        i = 0
+        read_image = False
+        read_depth = False
+        sample  = {}
+        for msg in scene_data['bag'].read_messages(topics=[self.image_topic, self.depth_topic]):
+            
+            if read_image and read_depth:
+                sample['id'] = scene_data['frame_id'][i]
+                sample['img'] = np_img    #get the rgb image
+                if self.get_depth:
+                    sample['depth'] = np_depth    #get ground truth depth map
+                if self.get_pose:
+                    sample['pose'] = scene_data['pose'][i][:3]    #get ground truth pose (we remove the last line of the matrix, which is always [0, 0, 0, 1] and carries no information)
+                yield sample
+                read_image = False
+                read_depth = False
+                k+=1
+                if k >= nb_frames:
+                    break
+                i = selected_frames[k]
+            
+            if msg.topic == self.image_topic and str(msg.timestamp)==scene_data['frame_id'][i]:
+                msg.message.__class__ = ROS_Image
+                np_img = imread(bytes(msg.message.data))
+                np_img = imresize(np_img, (self.img_height, self.img_width))  #resize the image to the size provided by the user
+                np_img = (np_img * 255).astype(np.uint8)
+                read_image = True
+                
+            if msg.topic == self.depth_topic and str(msg.timestamp)==scene_data['depth_frame_id'][i]:
+                msg.message.__class__ = ROS_Image
+                np_depth = imread(bytes(msg.message.data))
+                np_depth = imresize(np_depth, (self.img_height, self.img_width))  #resize the image to the size provided by the user
+                read_depth = True
