@@ -3,6 +3,7 @@ import numpy as np
 from path import Path
 from skimage.transform import resize as imresize
 from imageio import imread
+from tqdm import tqdm
 
 import rosbag
 from ros_numpy import numpify
@@ -66,7 +67,7 @@ class RosbagLoader(object):
         self.cam_info_topic = '/camera/color/camera_info'
         self.img_height = img_height
         self.img_width = img_width
-        self.min_speed = 0.05
+        self.min_speed = 0.3
         self.get_depth = get_depth
         self.get_pose = get_pose
         self.depth_size_ratio = depth_size_ratio
@@ -81,27 +82,37 @@ class RosbagLoader(object):
         bag_object = rosbag.Bag(drive)
         scene_data = {'drive': drive.name[:-4], 'bag': bag_object, 'rel_path': drive.name[:-4], 'pose': [], 'intrinsics': [], 'frame_id': [], 'depth_frame_id': [], 'pose':[]}
         
-        known_position = False
         known_transform = False
+        known_position = False
         img_counter = 0
         depth_counter = 0
+        missing_poses = []
         for msg in scene_data['bag'].read_messages(topics=["/tf", self.image_topic, self.depth_topic, self.odom_topic, self.cam_info_topic]):
             
             if known_position:
                 if msg.topic == self.image_topic and img_counter <= depth_counter:
                     img_counter += 1
-                    scene_data['frame_id'].append(str(msg.timestamp))
-                    scene_data['pose'].append(pose)
-                    
+                    scene_data['frame_id'].append(msg.timestamp)
+                    missing_poses.append(msg.timestamp)
+                  
                 if msg.topic == self.depth_topic and img_counter >= depth_counter:
                     depth_counter += 1
-                    scene_data['depth_frame_id'].append(str(msg.timestamp))
-                known_position = False
+                    scene_data['depth_frame_id'].append(msg.timestamp)
                     
             if known_transform and msg.topic == self.odom_topic:
-                known_position = True
+                if known_position:
+                    last_timestamp = timestamp
+                    last_pose = pose
+                timestamp = msg.timestamp
                 pose_msg = msg.message.pose.pose
                 pose = pose_from_Pose_and_Transform(pose_msg, tf_msg)
+                if known_position:
+                    for t in missing_poses: #all timestamps corresponding to the images read since the last odometry reading
+                        ratio = (t - last_timestamp)/(timestamp - last_timestamp)
+                        computed_pose = ratio*last_pose + (1-ratio)*pose
+                        scene_data['pose'].append(computed_pose)
+                missing_poses = []
+                known_position = True
                 
             if msg.topic=="/tf":
                 for tf in msg.message.transforms:
@@ -111,6 +122,12 @@ class RosbagLoader(object):
             
             if msg.topic == self.cam_info_topic:
                 scene_data['intrinsics'] = msg.message.K
+        
+        if known_position:
+            for t in missing_poses: #if there are still images read since the last odometry message of the bag
+                ratio = (t - timestamp)/(timestamp - last_timestamp)
+                computed_pose = ratio*last_pose + (1-ratio)*pose
+                scene_data['pose'].append(computed_pose)
         
         if len(scene_data['frame_id'])>len(scene_data['depth_frame_id']):
             scene_data['frame_id'] = scene_data['frame_id'][:-1]
@@ -140,10 +157,10 @@ class RosbagLoader(object):
         read_image = False
         read_depth = False
         sample  = {}
-        for msg in scene_data['bag'].read_messages(topics=[self.image_topic, self.depth_topic]):
+        for msg in tqdm(scene_data['bag'].read_messages(topics=[self.image_topic, self.depth_topic])):
             
             if read_image and read_depth:
-                sample['id'] = scene_data['frame_id'][i]
+                sample['id'] = str(scene_data['frame_id'][i])
                 sample['img'] = np_img    #get the rgb image
                 if self.get_depth:
                     sample['depth'] = np_depth    #get ground truth depth map
@@ -157,14 +174,14 @@ class RosbagLoader(object):
                     break
                 i = selected_frames[k]
             
-            if msg.topic == self.image_topic and str(msg.timestamp)==scene_data['frame_id'][i]:
+            if msg.topic == self.image_topic and msg.timestamp==scene_data['frame_id'][i]:
                 msg.message.__class__ = ROS_Image
                 np_img = imread(bytes(msg.message.data))
                 np_img = imresize(np_img, (self.img_height, self.img_width))  #resize the image to the size provided by the user
                 np_img = (np_img * 255).astype(np.uint8)
                 read_image = True
                 
-            if msg.topic == self.depth_topic and str(msg.timestamp)==scene_data['depth_frame_id'][i]:
+            if msg.topic == self.depth_topic and msg.timestamp==scene_data['depth_frame_id'][i]:
                 msg.message.__class__ = ROS_Image
                 np_depth = imread(bytes(msg.message.data))
                 np_depth = imresize(np_depth, (self.img_height, self.img_width))  #resize the image to the size provided by the user
