@@ -2,7 +2,8 @@
     <arg name="output_disp" default="true" doc="save disparity img" />
     <arg name="output_depth" default="true" doc="save depth img" />
     <arg name="pretrained_disp" doc="pretrained DispNet path" />
-    <arg name="pretrained_pose" doc="pretrained PoseNet path" />
+    <arg name="pretrained_pose" default="" doc="pretrained PoseNet path" />
+    <arg name="odom_topic" default="/husky_velocity_controller/odom" doc="odometry topic for the robot" />
     <arg name="img_height" default="128" doc="Image height" />
     <arg name="img_width" default="416" doc="Image width" />
     <arg name="no_resize" default="true" doc="no resizing is done" />
@@ -16,7 +17,8 @@
         <param name="output_disp" value="$(arg output_disp)" />
         <param name="output_depth" value="$(arg output_depth)" />
         <param name="pretrained_disp" value="$(arg pretrained_disp)" />
-        <param name="pretrained_pose" value="$(arg pretrained_pose)" />
+        <param name="pretrained_posenet" value="$(arg pretrained_pose)" />
+        <param name="odom_topic" value="$(arg odom_topic)" />
         <param name="img_height" value="$(arg img_height)" />
         <param name="img_width" value="$(arg img_width)" />
         <param name="no_resize" value="$(arg no_resize)" />

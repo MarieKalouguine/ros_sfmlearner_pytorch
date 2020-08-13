@@ -22,7 +22,17 @@ def get_args():
     
     # Required arguments
     args.add('pretrained_disp', rospy.get_param('~pretrained_disp'))
-    args.add('pretrained_pose', rospy.get_param('~pretrained_pose'))
+    camera_link = rospy.get_param('~camera_link', 'camera_link')
+    posenet = rospy.get_param('~pretrained_pose')
+    odom_topic = rospy.get_param('~odom_topic')
+    args.add('use_pose', posenet and odom_topic)
+    if args.use_pose:
+        args.add('pretrained_posenet', posenet)
+        args.add('odom_topic', odom_topic)
+    if (not posenet and odom_topic):
+        rospy.logerr("You have to specify a pretrained pose network!")
+    if (not posenet and odom_topic):
+        rospy.logerr("You have to specify an odometry topic!")
     args.add('img_height', rospy.get_param('~img_height'))
     args.add('img_width', rospy.get_param('~img_width'))
     args.add('no_resize', rospy.get_param('~no_resize'))
@@ -49,7 +59,8 @@ class DepthEstimator(object):
         self.disp_net.load_state_dict(weights['state_dict'])
         self.disp_net.eval()
         
-        weights = torch.load(self.args.pretrained_pose)
+        if self.args.use_pose:
+            weights = torch.load(self.args.pretrained_posenet)
         seq_length = int(weights['state_dict']['conv1.0.weight'].size(1)/3)
         self.pose_net = PoseExpNet(nb_ref_imgs=seq_length - 1, output_exp=False).to(self.device)
         self.seq_length = seq_length
@@ -67,12 +78,11 @@ class DepthEstimator(object):
         
         self.camera_link = "camera_link"
         
-        self.imu_position = []
-        self.imu_position_old = []
-        self.net_position = []
-        self.net_position_old = []
-        self.received_odom = False
-        self.ratio = 0
+        self.imu_position_t = []    #ground truth pose at t
+        self.imu_position_t_1 = []  #ground truth pose at t-1
+        self.imu_position_t_2 = []  #ground truth pose at t-2
+        self.net_position_t_2 = []
+        self.ratio = 1
         self.counter = 0
 
     def rgb_info_callback(self, data):
@@ -81,22 +91,20 @@ class DepthEstimator(object):
         self.pub_depth_info.publish(data)
         
     def camera_callback(self, data):
-        np_image = imread(bytes(data.data))
-        disp, pose = self.run_inference(np_image)
-        pose = pose.detach().cpu()
-        
-        np_pose = pose[0].numpy().reshape((3, 4))
-        self.net_position = np_pose.transpose()[2]
-        
-        if self.received_odom and self.imu_position_old!=[] and self.net_position_old!=[]:
-            imu_shift = np.linalg.norm(self.imu_position - self.imu_position_old)
-            net_shift = np.linalg.norm(self.net_position - self.net_position_old)
+        if len(self.net_position_t_2)>0 and len(self.imu_position_t_2)>0:
+            imu_shift = np.linalg.norm(self.imu_position_t - self.imu_position_t_2)
+            net_shift = np.linalg.norm(self.net_position_t - self.net_position_t_2)
             if imu_shift and net_shift:
                 self.ratio = (self.counter*self.ratio + imu_shift/net_shift)/(self.counter+1)
                 self.counter += 1
-        self.received_odom = False
-        self.net_position_old = self.net_position
-        self.imu_position_old = self.imu_position
+        
+        np_image = imread(bytes(data.data))
+        disp, pose = self.run_inference(np_image)
+        net_poses = pose.detach().cpu()
+        
+        #the following poses are actually estimated for t-1 and t+1, but are used at the next iteration, hence the names
+        self.net_position_t_2 = net_poses[0,0,:3].numpy() #estimated pose is in 6DoF format (3 for translation and 3 for euler rotation)
+        self.net_position_t = net_poses[0,1,:3].numpy()
         
         disp = disp.detach().cpu()
         np_disp = disp[0].numpy() / self.ratio
@@ -115,9 +123,10 @@ class DepthEstimator(object):
         self.pub_rgb.publish(ros_image)
     
     def odom_callback(self, data):
+        self.imu_position_t_2 = self.imu_position_t_1
+        self.imu_position_t_1 = self.imu_position_t
         pose_msg = data.pose.pose
-        self.imu_position = matrix_from_Pose_msg(pose_msg).transpose()[3][:3]/100
-        self.received_odom = True
+        self.imu_position_t = matrix_from_Pose_msg(pose_msg).transpose()[3][:3]
         
     def run_inference(self, img):
         """ Returns the estimation of depth & disparity by using the dispnet. """
@@ -131,7 +140,7 @@ class DepthEstimator(object):
         tensor_img = torch.from_numpy(img.astype(np.float32)).unsqueeze(0)
         tensor_img = ((tensor_img/255 - 0.5)/0.5).to(self.device)
         disp = self.disp_net(tensor_img)[0]
-        pose = self.pose_net(tensor_img, [tensor_img, tensor_img])[1]
+        pose = self.pose_net(tensor_img, [tensor_img]*(self.seq_length-1))[1]
         return disp, pose
     
 

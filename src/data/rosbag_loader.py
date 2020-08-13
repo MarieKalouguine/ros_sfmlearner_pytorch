@@ -84,33 +84,40 @@ class RosbagLoader(object):
         
         known_transform = False
         known_position = False
-        img_counter = 0
-        depth_counter = 0
+        known_depth = False
         missing_poses = []
+        missing_depths = []
         for msg in scene_data['bag'].read_messages(topics=["/tf", self.image_topic, self.depth_topic, self.odom_topic, self.cam_info_topic]):
             
-            if known_position:
-                if msg.topic == self.image_topic and img_counter <= depth_counter:
-                    img_counter += 1
+            if known_position and known_depth:
+                if msg.topic == self.image_topic:
                     scene_data['frame_id'].append(msg.timestamp)
                     missing_poses.append(msg.timestamp)
+                    missing_depths.append(msg.timestamp)
                   
-                if msg.topic == self.depth_topic and img_counter >= depth_counter:
-                    depth_counter += 1
-                    scene_data['depth_frame_id'].append(msg.timestamp)
+            if msg.topic == self.depth_topic:
+                if known_depth:
+                    last_depth_timestamp = depth_timestamp
+                depth_timestamp = msg.timestamp
+                for t in missing_depths: #all timestamps corresponding to the images read since the last depth reading
+                    if (t-last_depth_timestamp) < (depth_timestamp-t):
+                        scene_data['depth_frame_id'].append(last_depth_timestamp)
+                    else:
+                        scene_data['depth_frame_id'].append(depth_timestamp)
+                missing_depths = []
+                known_depth = True
                     
             if known_transform and msg.topic == self.odom_topic:
                 if known_position:
-                    last_timestamp = timestamp
+                    last_odom_timestamp = odom_timestamp
                     last_pose = pose
-                timestamp = msg.timestamp
+                odom_timestamp = msg.timestamp
                 pose_msg = msg.message.pose.pose
                 pose = pose_from_Pose_and_Transform(pose_msg, tf_msg)
-                if known_position:
-                    for t in missing_poses: #all timestamps corresponding to the images read since the last odometry reading
-                        ratio = (t - last_timestamp)/(timestamp - last_timestamp)
-                        computed_pose = ratio*last_pose + (1-ratio)*pose
-                        scene_data['pose'].append(computed_pose)
+                for t in missing_poses: #all timestamps corresponding to the images read since the last odometry reading
+                    ratio = (t - last_odom_timestamp)/(odom_timestamp - last_odom_timestamp)
+                    computed_pose = ratio*last_pose + (1-ratio)*pose
+                    scene_data['pose'].append(computed_pose)
                 missing_poses = []
                 known_position = True
                 
@@ -125,17 +132,11 @@ class RosbagLoader(object):
         
         if known_position:
             for t in missing_poses: #if there are still images read since the last odometry message of the bag
-                ratio = (t - timestamp)/(timestamp - last_timestamp)
+                ratio = (t - odom_timestamp)/(odom_timestamp - last_odom_timestamp)
                 computed_pose = ratio*last_pose + (1-ratio)*pose
                 scene_data['pose'].append(computed_pose)
-        
-        if len(scene_data['frame_id'])>len(scene_data['depth_frame_id']):
-            scene_data['frame_id'] = scene_data['frame_id'][:-1]
-            scene_data['pose'] = scene_data['pose'][:-1]
-        if len(scene_data['frame_id'])<len(scene_data['depth_frame_id']):
-            scene_data['depth_frame_id'] = scene_data['depth_frame_id'][:-1]
             
-        if img_counter==0:  #Check that the scene is not empty
+        if len(scene_data['frame_id'])==0:  #Check that the scene is not empty
             return []
 
         return [scene_data]
@@ -157,7 +158,7 @@ class RosbagLoader(object):
         read_image = False
         read_depth = False
         sample  = {}
-        for msg in tqdm(scene_data['bag'].read_messages(topics=[self.image_topic, self.depth_topic])):
+        for msg in scene_data['bag'].read_messages(topics=[self.image_topic, self.depth_topic]):
             
             if read_image and read_depth:
                 sample['id'] = str(scene_data['frame_id'][i])
