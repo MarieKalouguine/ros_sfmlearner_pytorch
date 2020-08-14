@@ -31,6 +31,10 @@ parser.add_argument("--depth-topic", type=str, default='/camera/depth/image_rect
                     help="ROS topic containing the ground truth depth images")
 parser.add_argument("--odom-topic", type=str, default='/husky_velocity_controller/odom',
                     help="ROS topic containing the ground truth odometry")
+parser.add_argument("--use-tf", action='store_true',
+                    help="Use tf readings in order to get the camera's odometry")
+parser.add_argument("--camera-link", type=str, default='camera_link',
+                    help="The link of the camera in the tf structure")
 
 args = parser.parse_args()
 
@@ -97,6 +101,8 @@ def main():
                                     odom_topic=args.odom_topic,
                                     img_height=args.height,
                                     img_width=args.width,
+                                    use_tf=args.use_tf,
+                                    camera_link=args.camera_link,
                                     depth_size_ratio=args.depth_size_ratio)
 
     n_scenes = len(data_loader.scenes)  #A scene is a bunch of frames that correspond to a continuous movement.

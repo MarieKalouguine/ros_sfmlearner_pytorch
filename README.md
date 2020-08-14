@@ -92,7 +92,7 @@ Notice that for Cityscapes the `img_height` is set to 171 because we crop out th
 
 If you want to use your own data, you can also get it from rosbag recordings (it is better to have at least two, in order to have one for validation). You can use the options --with-depth and --with-pose if you have recorded topics with ground truth depth and/or pose, thay will be saved along with the images. Recording odometry is recommended, as it is used to filter frames where the camera doesn't move, and it leads to a better training.
 ```bash
-python3 data/prepare_train_data.py /path/to/your/rosbags/ --dataset-format 'rosbag' --dump-root /path/to/resulting/formatted/data/ --image-topic /image/topic --cam-info-topic /camera/info/topic [--width 640 --height 480] [--num-threads 4] [--with-depth --depth-topic /ground/depth/topic] [--with-pose --odom-topic /odometry/topic]
+python3 data/prepare_train_data.py /path/to/your/rosbags/ --dataset-format 'rosbag' --dump-root /path/to/resulting/formatted/data/ --image-topic /image/topic --cam-info-topic /camera/info/topic [--width 640 --height 480] [--num-threads 4] [--with-depth --depth-topic /ground/depth/topic] [--with-pose --odom-topic /odometry/topic] [--use-tf --camera-link camera_link]
 ```
 
 ## Training
@@ -110,7 +110,7 @@ and visualize the training progress by opening [https://localhost:6006](https://
 
 The project is now integrated in ROS, which allows to easily use it in real-time applications with the launch file `estimate_depth.launch`. It emulates a RGBD camera (named /sfmlearner) by publishing on standart camera topics. Having odometry readings is not necessairy, but combined with the pretrained posenet it can be used to realistically rescale the depth.
 ```bash
-roslaunch ros_sfmlearner_pytorch estimate_depth.launch pretrained_disp:=/path/to/dispnet [pretrained_pose:=/path/to/posenet odom_topic:=/odometry/topic] [camera_link:=/camera_link] [img_height:=480] [img_width:=640]
+roslaunch ros_sfmlearner_pytorch estimate_depth.launch pretrained_disp:=/path/to/dispnet [pretrained_pose:=/path/to/posenet odom_topic:=/odometry/topic] [camera_link:=camera_link] [img_height:=480] [img_width:=640] [use-tf:=true]
 ```
 
 Disparity map generation can be done with `run_inference.py`

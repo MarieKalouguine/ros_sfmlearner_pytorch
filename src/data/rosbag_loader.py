@@ -56,20 +56,24 @@ class RosbagLoader(object):
                  cam_info_topic,
                  depth_topic,
                  odom_topic,
+                 camera_link,
                  get_depth=False,
                  get_pose=False,
+                 use_tf=False,
                  depth_size_ratio=1):
         
         self.dataset_files = Path(dataset_dir).files()
+        self.img_height = img_height
+        self.img_width = img_width
         self.image_topic = image_topic
         self.get_depth = get_depth
         self.get_pose = get_pose
         self.depth_topic = depth_topic
         self.odom_topic = odom_topic
         self.cam_info_topic = cam_info_topic
-        self.img_height = img_height
-        self.img_width = img_width
-        self.min_speed = 0.3
+        self.use_tf = use_tf
+        self.camera_link = camera_link
+        self.min_speed = 0.1
         self.depth_size_ratio = depth_size_ratio
         self.collect_train_files()    #loading the file names in self.scenes
         
@@ -93,7 +97,8 @@ class RosbagLoader(object):
             topics_to_read.append(self.depth_topic)
         if self.get_pose:
             topics_to_read.append(self.odom_topic)
-            topics_to_read.append("/tf")
+            if self.use_tf:
+                topics_to_read.append("/tf")
         for msg in scene_data['bag'].read_messages(topics=topics_to_read):
             
             if (known_position or not self.get_pose) and (known_depth or not self.get_depth):
@@ -114,13 +119,16 @@ class RosbagLoader(object):
                 missing_depths = []
                 known_depth = True
                     
-            if known_transform and msg.topic == self.odom_topic:
+            if (not self.use_tf or known_transform) and msg.topic == self.odom_topic:
                 if known_position:
                     last_odom_timestamp = odom_timestamp
                     last_pose = pose
                 odom_timestamp = msg.timestamp
                 pose_msg = msg.message.pose.pose
-                pose = pose_from_Pose_and_Transform(pose_msg, tf_msg)
+                if self.use_tf:
+                    pose = pose_from_Pose_and_Transform(pose_msg, tf_msg)
+                else:
+                    pose = matrix_from_Pose_msg(pose_msg)
                 for t in missing_poses: #all timestamps corresponding to the images read since the last odometry reading
                     ratio = (t - last_odom_timestamp)/(odom_timestamp - last_odom_timestamp)
                     computed_pose = ratio*last_pose + (1-ratio)*pose
@@ -130,7 +138,7 @@ class RosbagLoader(object):
                 
             if msg.topic=="/tf":
                 for tf in msg.message.transforms:
-                    if  tf.header.frame_id=="base_link" and tf.child_frame_id=="camera_link":
+                    if  tf.header.frame_id=="base_link" and tf.child_frame_id==self.camera_link:
                         tf_msg = tf.transform
                         known_transform = True
             

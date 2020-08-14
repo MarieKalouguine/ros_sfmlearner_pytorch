@@ -6,6 +6,7 @@ import numpy as np
 from ros_numpy import msgify
 from sensor_msgs.msg import Image as ROS_Image, CompressedImage as ROS_CImage, CameraInfo
 from nav_msgs.msg import Odometry
+from tf2_msgs.msg import TFMessage
 
 import torch
 from PIL import Image
@@ -46,6 +47,7 @@ def get_args():
     args.add('img_height', rospy.get_param('~img_height'))
     args.add('img_width', rospy.get_param('~img_width'))
     args.add('camera_link', rospy.get_param('~camera_link'))
+    args.add('use_tf', rospy.get_param('~use_tf'))
     
     return args
 
@@ -70,15 +72,6 @@ class DepthEstimator(object):
             self.pose_net = PoseExpNet(nb_ref_imgs=seq_length - 1, output_exp=False).to(self.device)
             self.seq_length = seq_length
             self.pose_net.load_state_dict(weights['state_dict'], strict=False)
-        
-        if self.args.image_topic[-11:]=="/compressed":
-            self.image_sub = rospy.Subscriber(self.args.image_topic, ROS_CImage, self.camera_callback, queue_size=1, buff_size=52428800)
-        else:
-            self.image_sub = rospy.Subscriber(self.args.image_topic, ROS_Image, self.camera_callback, queue_size=1, buff_size=52428800)
-        self.info_sub = rospy.Subscriber(self.args.camera_info_topic, CameraInfo, self.rgb_info_callback, queue_size=1, buff_size=52428800)
-        if self.args.use_pose:
-            self.odom_sub = rospy.Subscriber(self.args.odom_topic, Odometry, self.odom_callback, queue_size=1, buff_size=52428800)
-        
         self.pub_rgb_info = rospy.Publisher('/sfmlearner/rgb/camera_info', CameraInfo, queue_size=1)
         self.pub_rgb = rospy.Publisher('/sfmlearner/rgb/image_raw', ROS_Image, queue_size=1)
         self.pub_depth_info = rospy.Publisher('/sfmlearner/depth/camera_info', CameraInfo, queue_size=1)
@@ -91,6 +84,18 @@ class DepthEstimator(object):
         self.net_position_t_2 = []
         self.counter = 0
         self.ratio = 1
+        self.known_transform = False
+        
+        if self.args.image_topic[-11:]=="/compressed":
+            self.image_sub = rospy.Subscriber(self.args.image_topic, ROS_CImage, self.camera_callback, queue_size=1, buff_size=52428800)
+        else:
+            self.image_sub = rospy.Subscriber(self.args.image_topic, ROS_Image, self.camera_callback, queue_size=1, buff_size=52428800)
+        self.info_sub = rospy.Subscriber(self.args.camera_info_topic, CameraInfo, self.rgb_info_callback, queue_size=1, buff_size=52428800)
+        if self.args.use_pose:
+            self.odom_sub = rospy.Subscriber(self.args.odom_topic, Odometry, self.odom_callback, queue_size=1, buff_size=52428800)
+            if self.args.use_tf:
+                self.tf_sub = rospy.Subscriber('/tf', TFMessage, self.tf_callback, queue_size=1, buff_size=52428800)
+        
 
     def rgb_info_callback(self, data):
         data.header.frame_id = self.args.camera_link
@@ -131,18 +136,28 @@ class DepthEstimator(object):
         self.pub_depth.publish(ros_depth)
         self.pub_rgb.publish(ros_image)
     
+    def tf_callback(self, data):
+        for tf in data.transforms:
+            if  tf.header.frame_id=="base_link" and tf.child_frame_id==self.args.camera_link:
+                self.tf_msg = tf.transform
+                self.known_transform = True
+    
     def odom_callback(self, data):
         self.imu_position_t_2 = self.imu_position_t_1
         self.imu_position_t_1 = self.imu_position_t
         pose_msg = data.pose.pose
-        self.imu_position_t = matrix_from_Pose_msg(pose_msg).transpose()[3][:3]
+        if self.args.use_tf:
+            if self.known_transform:
+                self.imu_position_t = pose_from_Pose_and_Transform(pose_msg, self.tf_msg).transpose()[3][:3]
+        else:
+            self.imu_position_t = matrix_from_Pose_msg(pose_msg).transpose()[3][:3]
         
     def run_inference(self, img):
         """ Returns the estimation of depth & disparity by using the dispnet. """
         h,w,_ = img.shape
         h1 = self.args.img_height if self.args.img_height else h
         w1 = self.args.img_width if self.args.img_width else w
-        img = np.array(Image.fromarray(img).resize((h1, w1)))
+        img = np.array(Image.fromarray(img).resize((w1, h1)))
         img = np.transpose(img, (2, 0, 1))
 
         tensor_img = torch.from_numpy(img.astype(np.float32)).unsqueeze(0)

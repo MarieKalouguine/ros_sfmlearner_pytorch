@@ -3,6 +3,7 @@
     <arg name="pretrained_pose" default="" doc="Pretrained PoseNet path (for rescaling the depth map)" />
     <arg name="odom_topic" default="" doc="Odometry topic (for rescaling the depth map)" />
     <arg name="camera_link" default="camera_link" doc="tf link of the camera (for the pointcloud)" />
+    <arg name="use_tf" default="false" doc="Use tf in order to get camera's odometry" />
     <arg name="image_topic" default="/camera/color/image_raw/compressed" doc="camera image topic" />
     <arg name="camera_info_topic" default="/camera/color/camera_info" doc="camera info topic" />
     <arg name="img_height" default="0" doc="Image height for resizing (optional)" />
@@ -15,6 +16,7 @@
         <param name="image_topic" value="$(arg image_topic)" />
         <param name="camera_info_topic" value="$(arg camera_info_topic)" />
         <param name="camera_link" value="$(arg camera_link)" />
+        <param name="use_tf" value="$(arg use_tf)" />
         <param name="img_height" value="$(arg img_height)" />
         <param name="img_width" value="$(arg img_width)" />
     </node>
