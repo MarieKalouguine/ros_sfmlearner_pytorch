@@ -1,29 +1,21 @@
 <launch>
-    <arg name="output_disp" default="true" doc="save disparity img" />
-    <arg name="output_depth" default="true" doc="save depth img" />
     <arg name="pretrained_disp" doc="pretrained DispNet path" />
-    <arg name="pretrained_pose" default="" doc="pretrained PoseNet path" />
-    <arg name="odom_topic" default="/husky_velocity_controller/odom" doc="odometry topic for the robot" />
-    <arg name="img_height" default="128" doc="Image height" />
-    <arg name="img_width" default="416" doc="Image width" />
-    <arg name="no_resize" default="true" doc="no resizing is done" />
-    
-    <arg name="dataset_dir" default="input" doc="Dataset directory" />
-    <arg name="output_dir" default="output" doc="Output directory" />
-    
-    <arg name="img_exts" default="['png', 'jpg', 'bmp']" doc="images extensions to glob" />
+    <arg name="pretrained_pose" default="" doc="Pretrained PoseNet path (for rescaling the depth map)" />
+    <arg name="odom_topic" default="" doc="Odometry topic (for rescaling the depth map)" />
+    <arg name="camera_link" default="camera_link" doc="tf link of the camera (for the pointcloud)" />
+    <arg name="image_topic" default="/camera/color/image_raw/compressed" doc="camera image topic" />
+    <arg name="camera_info_topic" default="/camera/color/camera_info" doc="camera info topic" />
+    <arg name="img_height" default="0" doc="Image height for resizing (optional)" />
+    <arg name="img_width" default="0" doc="Image width for resizing (optional)" />
     
     <node name="depth_estimation_node" pkg="ros_sfmlearner_pytorch" type="estimate_depth.py" output="screen" >
-        <param name="output_disp" value="$(arg output_disp)" />
-        <param name="output_depth" value="$(arg output_depth)" />
         <param name="pretrained_disp" value="$(arg pretrained_disp)" />
-        <param name="pretrained_posenet" value="$(arg pretrained_pose)" />
+        <param name="pretrained_pose" value="$(arg pretrained_pose)" />
         <param name="odom_topic" value="$(arg odom_topic)" />
+        <param name="image_topic" value="$(arg image_topic)" />
+        <param name="camera_info_topic" value="$(arg camera_info_topic)" />
+        <param name="camera_link" value="$(arg camera_link)" />
         <param name="img_height" value="$(arg img_height)" />
         <param name="img_width" value="$(arg img_width)" />
-        <param name="no_resize" value="$(arg no_resize)" />
-        <param name="dataset_dir" value="$(arg dataset_dir)" />
-        <param name="output_dir" value="$(arg output_dir)" />
-        <param name="img_exts" value="$(arg img_exts)" />
     </node>
 </launch>

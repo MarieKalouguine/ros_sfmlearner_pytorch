@@ -22,7 +22,6 @@ def get_args():
     
     # Required arguments
     args.add('pretrained_disp', rospy.get_param('~pretrained_disp'))
-    camera_link = rospy.get_param('~camera_link', 'camera_link')
     posenet = rospy.get_param('~pretrained_pose')
     odom_topic = rospy.get_param('~odom_topic')
     args.add('use_pose', posenet and odom_topic)
@@ -30,17 +29,24 @@ def get_args():
         args.add('pretrained_posenet', posenet)
         args.add('odom_topic', odom_topic)
     if (not posenet and odom_topic):
-        rospy.logerr("You have to specify a pretrained pose network!")
-    if (not posenet and odom_topic):
-        rospy.logerr("You have to specify an odometry topic!")
+        rospy.logerr("You must specify a pretrained pose network!")
+        rospy.signal_shutdown()
+    if (not odom_topic and posenet):
+        rospy.logerr("You must specify an odometry topic!")
+        rospy.signal_shutdown()
+    image_topic = rospy.get_param('~image_topic')
+    if not image_topic:
+        rospy.logerr("You must specify the image topic!")
+        rospy.signal_shutdown()
+    camera_info_topic = rospy.get_param('~camera_info_topic')
+    if not camera_info_topic:
+        rospy.logerr("You must specify the camera info topic!")
+        rospy.signal_shutdown()
+    args.add('image_topic', image_topic)
+    args.add('camera_info_topic', camera_info_topic)
     args.add('img_height', rospy.get_param('~img_height'))
     args.add('img_width', rospy.get_param('~img_width'))
-    args.add('no_resize', rospy.get_param('~no_resize'))
-    
-    args.add('dataset_dir', rospy.get_param('~dataset_dir'))
-    args.add('output_dir', rospy.get_param('~output_dir'))
-    
-    args.add('img_exts', rospy.get_param('~img_exts'))
+    args.add('camera_link', rospy.get_param('~camera_link'))
     
     return args
 
@@ -61,14 +67,18 @@ class DepthEstimator(object):
         
         if self.args.use_pose:
             weights = torch.load(self.args.pretrained_posenet)
-        seq_length = int(weights['state_dict']['conv1.0.weight'].size(1)/3)
-        self.pose_net = PoseExpNet(nb_ref_imgs=seq_length - 1, output_exp=False).to(self.device)
-        self.seq_length = seq_length
-        self.pose_net.load_state_dict(weights['state_dict'], strict=False)
+            seq_length = int(weights['state_dict']['conv1.0.weight'].size(1)/3)
+            self.pose_net = PoseExpNet(nb_ref_imgs=seq_length - 1, output_exp=False).to(self.device)
+            self.seq_length = seq_length
+            self.pose_net.load_state_dict(weights['state_dict'], strict=False)
         
-        self.image_sub = rospy.Subscriber("/camera/color/image_raw/compressed", ROS_CImage, self.camera_callback, queue_size=1, buff_size=52428800)  # A big buffer is needed for a real-time estimation (no queue)
-        self.info_sub = rospy.Subscriber("/camera/color/camera_info", CameraInfo, self.rgb_info_callback, queue_size=1, buff_size=52428800)
-        self.odom_sub = rospy.Subscriber("/husky_velocity_controller/odom", Odometry, self.odom_callback, queue_size=1, buff_size=52428800)
+        if self.args.image_topic[-11:]=="/compressed":
+            self.image_sub = rospy.Subscriber(self.args.image_topic, ROS_CImage, self.camera_callback, queue_size=1, buff_size=52428800)
+        else:
+            self.image_sub = rospy.Subscriber(self.args.image_topic, ROS_Image, self.camera_callback, queue_size=1, buff_size=52428800)
+        self.info_sub = rospy.Subscriber(self.args.camera_info_topic, CameraInfo, self.rgb_info_callback, queue_size=1, buff_size=52428800)
+        if self.args.use_pose:
+            self.odom_sub = rospy.Subscriber(self.args.odom_topic, Odometry, self.odom_callback, queue_size=1, buff_size=52428800)
         
         self.pub_rgb_info = rospy.Publisher('/sfmlearner/rgb/camera_info', CameraInfo, queue_size=1)
         self.pub_rgb = rospy.Publisher('/sfmlearner/rgb/image_raw', ROS_Image, queue_size=1)
@@ -76,22 +86,20 @@ class DepthEstimator(object):
         self.pub_depth = rospy.Publisher('/sfmlearner/depth/image_raw', ROS_Image, queue_size=1)
         self.pub_disp = rospy.Publisher('/sfmlearner/disp/image_raw', ROS_Image, queue_size=1)
         
-        self.camera_link = "camera_link"
-        
         self.imu_position_t = []    #ground truth pose at t
         self.imu_position_t_1 = []  #ground truth pose at t-1
         self.imu_position_t_2 = []  #ground truth pose at t-2
         self.net_position_t_2 = []
-        self.ratio = 1
         self.counter = 0
+        self.ratio = 1
 
     def rgb_info_callback(self, data):
-        data.header.frame_id = self.camera_link
+        data.header.frame_id = self.args.camera_link
         self.pub_rgb_info.publish(data)
         self.pub_depth_info.publish(data)
         
     def camera_callback(self, data):
-        if len(self.net_position_t_2)>0 and len(self.imu_position_t_2)>0:
+        if self.args.use_pose and len(self.net_position_t_2)>0 and len(self.imu_position_t_2)>0:
             imu_shift = np.linalg.norm(self.imu_position_t - self.imu_position_t_2)
             net_shift = np.linalg.norm(self.net_position_t - self.net_position_t_2)
             if imu_shift and net_shift:
@@ -99,13 +107,14 @@ class DepthEstimator(object):
                 self.counter += 1
         
         np_image = imread(bytes(data.data))
-        disp, pose = self.run_inference(np_image)
-        net_poses = pose.detach().cpu()
+        disp, pose = self.run_inference(np_image)   #This is where the magic happens
+        if self.args.use_pose:
+            net_poses = pose.detach().cpu()
         
-        #the following poses are actually estimated for t-1 and t+1, but are used at the next iteration, hence the names
-        self.net_position_t_2 = net_poses[0,0,:3].numpy() #estimated pose is in 6DoF format (3 for translation and 3 for euler rotation)
-        self.net_position_t = net_poses[0,1,:3].numpy()
-        
+            #the following poses are actually estimated for t-1 and t+1, but are used at the next iteration, hence the names
+            self.net_position_t_2 = net_poses[0,0,:3].numpy() #estimated pose is in 6DoF format (3 for translation and 3 for euler rotation)
+            self.net_position_t = net_poses[0,1,:3].numpy()
+            
         disp = disp.detach().cpu()
         np_disp = disp[0].numpy() / self.ratio
         ros_disp = msgify(ROS_Image, np_disp, encoding='32FC1')
@@ -115,9 +124,9 @@ class DepthEstimator(object):
         
         ros_image = msgify(ROS_Image, np_image, encoding='rgb8')
         
-        ros_depth.header.frame_id = self.camera_link
-        ros_disp.header.frame_id = self.camera_link
-        ros_image.header.frame_id = self.camera_link
+        ros_depth.header.frame_id = self.args.camera_link
+        ros_disp.header.frame_id = self.args.camera_link
+        ros_image.header.frame_id = self.args.camera_link
         self.pub_disp.publish(ros_disp)
         self.pub_depth.publish(ros_depth)
         self.pub_rgb.publish(ros_image)
@@ -133,14 +142,16 @@ class DepthEstimator(object):
         h,w,_ = img.shape
         h1 = self.args.img_height if self.args.img_height else h
         w1 = self.args.img_width if self.args.img_width else w
-        if (not self.args.no_resize) and (h != h1 or w != w1):
+        if h != h1 or w != w1:
             img = np.array(Image.fromarray(img).resize((h1, w1)))
         img = np.transpose(img, (2, 0, 1))
 
         tensor_img = torch.from_numpy(img.astype(np.float32)).unsqueeze(0)
         tensor_img = ((tensor_img/255 - 0.5)/0.5).to(self.device)
         disp = self.disp_net(tensor_img)[0]
-        pose = self.pose_net(tensor_img, [tensor_img]*(self.seq_length-1))[1]
+        pose = []
+        if self.args.use_pose:
+            pose = self.pose_net(tensor_img, [tensor_img]*(self.seq_length-1))[1]
         return disp, pose
     
 
