@@ -1,8 +1,6 @@
 import argparse
-import scipy.misc
 import numpy as np
 from pebble import ProcessPool
-import sys
 from tqdm import tqdm
 from path import Path
 from imageio import imwrite

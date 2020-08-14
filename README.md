@@ -11,6 +11,7 @@ See the [project webpage](https://people.eecs.berkeley.edu/~tinghuiz/projects/Sf
 
 Original Author : Tinghui Zhou (tinghuiz@berkeley.edu)
 Pytorch implementation : Clément Pinard (clement.pinard@ensta-paristech.fr)
+ROS implementation : Marie Kalouguine (marie.kalouguine@ensta-paristech.fr)
 
 ![sample_results](misc/cityscapes_sample_results.gif)
 

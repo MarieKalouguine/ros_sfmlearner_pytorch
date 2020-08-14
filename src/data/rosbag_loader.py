@@ -3,13 +3,9 @@ import numpy as np
 from path import Path
 from skimage.transform import resize as imresize
 from imageio import imread
-from tqdm import tqdm
 
 import rosbag
-from ros_numpy import numpify
 from sensor_msgs.msg import CompressedImage as ROS_Image
-from geometry_msgs.msg import Pose, Transform
-from rospy.rostime import Time
 
     
 def translation_matrix(translation):
@@ -84,7 +80,7 @@ class RosbagLoader(object):
 
     def collect_scenes(self, drive):    #Create a dictionary for the data from a given scene/drive, including all images from the camera
         bag_object = rosbag.Bag(drive)
-        scene_data = {'drive': drive.name[:-4], 'bag': bag_object, 'rel_path': drive.name[:-4], 'pose': [], 'intrinsics': [], 'frame_id': [], 'depth_frame_id': [], 'pose':[]}
+        scene_data = {'drive': drive.name[:-4], 'bag': bag_object, 'rel_path': drive.name[:-4], 'pose': [], 'intrinsics': [], 'frame_id': [], 'depth_frame_id': []}
         
         known_transform = False
         known_position = False

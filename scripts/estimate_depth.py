@@ -3,7 +3,7 @@
 #import roslib
 import rospy
 import numpy as np
-from ros_numpy import numpify, msgify
+from ros_numpy import msgify
 from sensor_msgs.msg import Image as ROS_Image, CompressedImage as ROS_CImage, CameraInfo
 from nav_msgs.msg import Odometry
 
@@ -11,7 +11,6 @@ import torch
 from PIL import Image
 from imageio import imread
 from helpers import *
-import matplotlib.pyplot as plt
 
 from models import DispNetS, PoseExpNet
 
