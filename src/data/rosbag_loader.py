@@ -53,23 +53,27 @@ def pose_from_Pose_and_Transform(pose_msg, tf_msg):
 
 class RosbagLoader(object):
     def __init__(self,
-                 dataset_dir='/home/interns/learning_data/rosbags',
-                 img_height=480,
-                 img_width=640,
-                 get_depth=True,
-                 get_pose=True,
+                 dataset_dir,
+                 img_height,
+                 img_width,
+                 image_topic,
+                 cam_info_topic,
+                 depth_topic,
+                 odom_topic,
+                 get_depth=False,
+                 get_pose=False,
                  depth_size_ratio=1):
         
         self.dataset_files = Path(dataset_dir).files()
-        self.image_topic = '/camera/color/image_raw/compressed'
-        self.depth_topic = '/camera/depth/image_rect_raw/compressed'
-        self.odom_topic = '/husky_velocity_controller/odom'
-        self.cam_info_topic = '/camera/color/camera_info'
+        self.image_topic = image_topic
+        self.get_depth = get_depth
+        self.get_pose = get_pose
+        self.depth_topic = depth_topic
+        self.odom_topic = odom_topic
+        self.cam_info_topic = cam_info_topic
         self.img_height = img_height
         self.img_width = img_width
         self.min_speed = 0.3
-        self.get_depth = get_depth
-        self.get_pose = get_pose
         self.depth_size_ratio = depth_size_ratio
         self.collect_train_files()    #loading the file names in self.scenes
         
@@ -87,9 +91,16 @@ class RosbagLoader(object):
         known_depth = False
         missing_poses = []
         missing_depths = []
-        for msg in scene_data['bag'].read_messages(topics=["/tf", self.image_topic, self.depth_topic, self.odom_topic, self.cam_info_topic]):
+        
+        topics_to_read = [self.image_topic, self.cam_info_topic]
+        if self.get_depth:
+            topics_to_read.append(self.depth_topic)
+        if self.get_pose:
+            topics_to_read.append(self.odom_topic)
+            topics_to_read.append("/tf")
+        for msg in scene_data['bag'].read_messages(topics=topics_to_read):
             
-            if known_position and known_depth:
+            if (known_position or not self.get_pose) and (known_depth or not self.get_depth):
                 if msg.topic == self.image_topic:
                     scene_data['frame_id'].append(msg.timestamp)
                     missing_poses.append(msg.timestamp)
@@ -143,24 +154,30 @@ class RosbagLoader(object):
 
     def get_scene_imgs(self, scene_data):   #Collect the images of a given scene, taking speed into account
         
-        selected_frames = [0]
-        last_pose = scene_data['pose'][0]
-        for i, pose in enumerate(scene_data['pose'][1:]):
-            transform = np.linalg.inv(last_pose) @ pose  #pose transform matrix from the last selected frame
-            speed_mag = np.linalg.norm(transform - np.eye(4))
-            if speed_mag > self.min_speed:  #If the last frame was taken far enough
-                selected_frames.append(i+1) #register this frame as a valid one
-                last_pose = pose
+        if len(scene_data['pose'])>0:
+            selected_frames = [0]
+            last_pose = scene_data['pose'][0]
+            for i, pose in enumerate(scene_data['pose'][1:]):
+                transform = np.linalg.inv(last_pose) @ pose  #pose transform matrix from the last selected frame
+                speed_mag = np.linalg.norm(transform - np.eye(4))
+                if speed_mag > self.min_speed:  #If the last frame was taken far enough
+                    selected_frames.append(i+1) #register this frame as a valid one
+                    last_pose = pose
         
-        nb_frames = len(selected_frames)
+            nb_frames = len(selected_frames)
         k = 0
         i = 0
         read_image = False
         read_depth = False
         sample  = {}
-        for msg in scene_data['bag'].read_messages(topics=[self.image_topic, self.depth_topic]):
+        
+        topics_to_read = [self.image_topic]
+        if self.get_depth:
+            topics_to_read.append(self.depth_topic)
+        
+        for msg in scene_data['bag'].read_messages(topics=topics_to_read):
             
-            if read_image and read_depth:
+            if read_image and (read_depth or not self.get_depth):
                 sample['id'] = str(scene_data['frame_id'][i])
                 sample['img'] = np_img    #get the rgb image
                 if self.get_depth:
@@ -171,19 +188,29 @@ class RosbagLoader(object):
                 read_image = False
                 read_depth = False
                 k+=1
-                if k >= nb_frames:
-                    break
-                i = selected_frames[k]
+                if self.get_pose:
+                    if k >= nb_frames:
+                        break
+                    i = selected_frames[k]
+                else:
+                    i+=1
             
             if msg.topic == self.image_topic and msg.timestamp==scene_data['frame_id'][i]:
                 msg.message.__class__ = ROS_Image
                 np_img = imread(bytes(msg.message.data))
-                np_img = imresize(np_img, (self.img_height, self.img_width))  #resize the image to the size provided by the user
+                h,w,_ = np_img.shape
+                h1 = self.img_height if self.img_height else h
+                w1 = self.img_width if self.img_width else w
+                np_img = imresize(np_img, (h1, w1))  #resize the image to the size provided by the user
                 np_img = (np_img * 255).astype(np.uint8)
                 read_image = True
                 
             if msg.topic == self.depth_topic and msg.timestamp==scene_data['depth_frame_id'][i]:
                 msg.message.__class__ = ROS_Image
                 np_depth = imread(bytes(msg.message.data))
-                np_depth = imresize(np_depth, (self.img_height, self.img_width))  #resize the image to the size provided by the user
+                h,w = np_depth.shape
+                h1 = self.img_height if self.img_height else h
+                w1 = self.img_width if self.img_width else w
+                np_depth = imresize(np_depth, (h1, w1))  #resize the image to the size provided by the user
+                np_depth = np_depth/self.depth_size_ratio
                 read_depth = True

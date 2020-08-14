@@ -112,8 +112,9 @@ class DepthEstimator(object):
             net_poses = pose.detach().cpu()
         
             #the following poses are actually estimated for t-1 and t+1, but are used at the next iteration, hence the names
-            self.net_position_t_2 = net_poses[0,0,:3].numpy() #estimated pose is in 6DoF format (3 for translation and 3 for euler rotation)
-            self.net_position_t = net_poses[0,1,:3].numpy()
+            i = int((self.seq_length-1)/2)
+            self.net_position_t_2 = net_poses[0,i-1,:3].numpy() #estimated pose is in 6DoF format (3 for translation and 3 for euler rotation)
+            self.net_position_t = net_poses[0,i,:3].numpy()
             
         disp = disp.detach().cpu()
         np_disp = disp[0].numpy() / self.ratio
@@ -142,8 +143,7 @@ class DepthEstimator(object):
         h,w,_ = img.shape
         h1 = self.args.img_height if self.args.img_height else h
         w1 = self.args.img_width if self.args.img_width else w
-        if h != h1 or w != w1:
-            img = np.array(Image.fromarray(img).resize((h1, w1)))
+        img = np.array(Image.fromarray(img).resize((h1, w1)))
         img = np.transpose(img, (2, 0, 1))
 
         tensor_img = torch.from_numpy(img.astype(np.float32)).unsqueeze(0)

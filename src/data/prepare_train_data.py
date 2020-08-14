@@ -18,14 +18,23 @@ parser.add_argument("--with-pose", action='store_true',
                     help="If available (e.g. with KITTI), will store pose ground truth along with images, for validation")
 parser.add_argument("--no-train-gt", action='store_true',
                     help="If selected, will delete ground truth depth to save space")
-parser.add_argument("--dump-root", type=str, default='dump', help="Where to dump the data")
-parser.add_argument("--height", type=int, default=128, help="image height")
-parser.add_argument("--width", type=int, default=416, help="image width")
+parser.add_argument("--dump-root", type=str, default='dump', help="Where to dump the formatted data")
+parser.add_argument("--height", type=int, default=0, help="image height")
+parser.add_argument("--width", type=int, default=0, help="image width")
 parser.add_argument("--depth-size-ratio", type=int, default=1, help="will divide depth size by that ratio")
 parser.add_argument("--num-threads", type=int, default=4, help="number of threads to use")
 
-args = parser.parse_args()
+#The following arguments are only useful if the dataset is availible as rosbags
+parser.add_argument("--image-topic", type=str, default='/camera/color/image_raw/compressed',
+                    help="ROS topic containing the images from the camera")
+parser.add_argument("--cam-info-topic", type=str, default='/camera/color/camera_info',
+                    help="ROS topic containing the camera intrinsics (the camera must be calibrated)")
+parser.add_argument("--depth-topic", type=str, default='/camera/depth/image_rect_raw/compressed',
+                    help="ROS topic containing the ground truth depth images")
+parser.add_argument("--odom-topic", type=str, default='/husky_velocity_controller/odom',
+                    help="ROS topic containing the ground truth odometry")
 
+args = parser.parse_args()
 
 def dump_example(args, drive):
     scene_list = data_loader.collect_scenes(drive)
@@ -82,11 +91,15 @@ def main():
     if args.dataset_format == 'rosbag':
         from rosbag_loader import RosbagLoader
         data_loader = RosbagLoader(args.dataset_dir,
-                                    img_height=480,
-                                    img_width=640,
                                     get_depth=args.with_depth,
                                     get_pose=args.with_pose,
-                                    depth_size_ratio=1)
+                                    image_topic=args.image_topic,
+                                    cam_info_topic=args.cam_info_topic,
+                                    depth_topic=args.depth_topic,
+                                    odom_topic=args.odom_topic,
+                                    img_height=args.height,
+                                    img_width=args.width,
+                                    depth_size_ratio=args.depth_size_ratio)
 
     n_scenes = len(data_loader.scenes)  #A scene is a bunch of frames that correspond to a continuous movement.
     print('Found {} potential scenes'.format(n_scenes))
