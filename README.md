@@ -10,8 +10,10 @@ In CVPR 2017 (**Oral**).
 See the [project webpage](https://people.eecs.berkeley.edu/~tinghuiz/projects/SfMLearner/) for more details. 
 
 Original Author : Tinghui Zhou (tinghuiz@berkeley.edu)
+
 Pytorch implementation : Clément Pinard (clement.pinard@ensta-paristech.fr)
-ROS implementation : Marie Kalouguine (marie.kalouguine@ensta-paristech.fr)
+
+ROS wrapping : Marie Kalouguine (marie.kalouguine@ensta-paristech.fr)
 
 ![sample_results](misc/cityscapes_sample_results.gif)
 
